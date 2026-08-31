@@ -6,6 +6,22 @@ export type SourceId = Brand<string, "SourceId">;
 export type RuleId = Brand<string, "RuleId">;
 export type RunId = Brand<string, "RunId">;
 export type IssueId = Brand<string, "IssueId">;
+export type IssueEventId = Brand<string, "IssueEventId">;
+
+export const sourceKindSchema = z.enum(["csv", "google_sheets", "json_api"]);
+export type SourceKind = z.infer<typeof sourceKindSchema>;
+
+export const sourceScheduleSchema = z.union([z.literal(60), z.literal(360), z.literal(1440), z.literal(10080)]).nullable();
+export type SourceSchedule = z.infer<typeof sourceScheduleSchema>;
+
+export const remoteSourceInputSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  kind: z.enum(["google_sheets", "json_api"]),
+  url: z.string().url().max(2000),
+  recordPath: z.string().trim().max(240).optional(),
+  scheduleMinutes: sourceScheduleSchema.default(null),
+});
+export type RemoteSourceInput = z.infer<typeof remoteSourceInputSchema>;
 
 export const severitySchema = z.enum(["low", "medium", "high"]);
 export type Severity = z.infer<typeof severitySchema>;
@@ -37,6 +53,17 @@ export const ruleInputSchema = z.discriminatedUnion("type", [
     type: z.literal("pattern"),
     config: z.object({ pattern: z.string().min(1).max(300) }),
   }),
+  z.object({
+    ...ruleBase,
+    type: z.literal("numeric_outlier"),
+    config: z.object({ standardDeviations: z.number().min(1).max(6).default(3), minSamples: z.number().int().min(5).max(1000).default(10) }),
+  }),
+  z.object({
+    ...ruleBase,
+    type: z.literal("row_count_change"),
+    column: z.literal("__rows__"),
+    config: z.object({ maximumPercentChange: z.number().min(1).max(1000).default(25) }),
+  }),
 ]);
 
 export type RuleInput = z.infer<typeof ruleInputSchema>;
@@ -50,12 +77,29 @@ export const resolveIssueSchema = z.object({
 export type DataSource = {
   id: SourceId;
   name: string;
-  kind: "csv";
-  fileName: string;
+  kind: SourceKind;
+  fileName: string | null;
+  connectorUrl: string | null;
+  recordPath: string | null;
   rowCount: number;
   columns: string[];
+  scheduleMinutes: SourceSchedule;
+  nextRunAt: string | null;
+  lastSyncedAt: string | null;
+  syncStatus: "ready" | "syncing" | "failed";
+  syncError: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type IssueEventType = "opened" | "reopened" | "resolved" | "auto_resolved";
+
+export type IssueEvent = {
+  id: IssueEventId;
+  issueId: IssueId;
+  type: IssueEventType;
+  note: string | null;
+  createdAt: string;
 };
 
 export type Rule = RuleInput & {

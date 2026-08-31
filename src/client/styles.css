@@ -140,3 +140,17 @@ button, a, input, select, textarea { outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.source-tabs { margin-bottom: 10px; }
+.source-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding: 12px 0; }
+.schedule-field { min-width: 190px; }
+.file-button { position: relative; cursor: pointer; }
+.file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.sync-error { color: #7d261f; font-size: 10px; }
+.rule-actions { display: flex; align-items: center; gap: 12px; }
+.rule-actions .icon-button { width: 30px; height: 30px; color: var(--red); }
+.event-list { margin-top: 20px; border-top: 1px solid var(--line); }
+.event-row { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.event-row strong, .event-row small { display: block; }
+.event-row strong { font-size: 11px; text-transform: capitalize; }
+.event-row small { margin-top: 3px; color: var(--muted); font-size: 9px; }

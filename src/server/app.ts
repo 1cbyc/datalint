@@ -6,12 +6,17 @@ import multer from "multer";
 import { z, ZodError } from "zod";
 
 import {
+  remoteSourceInputSchema,
   resolveIssueSchema,
   ruleInputSchema,
+  sourceScheduleSchema,
   type IssueId,
+  type RuleId,
   type SourceId,
 } from "../shared/domain.js";
+import type { SourceSnapshot } from "./connectors.js";
 import { openDatabase, type DataLintDatabase } from "./database.js";
+import { deliverPendingAlerts } from "./scheduler.js";
 import { DataLintStore } from "./store.js";
 
 const identifierSchema = z.string().uuid();
@@ -25,6 +30,8 @@ type AppOptions = {
   maxUploadBytes?: number;
   apiToken?: string;
   allowedOrigins?: string[];
+  webhookUrl?: string;
+  remoteLoader?: (input: z.infer<typeof remoteSourceInputSchema>) => Promise<SourceSnapshot>;
 };
 
 function messageFor(error: unknown): string {
@@ -45,7 +52,7 @@ export async function createApp(options: AppOptions): Promise<{
     options.databaseUrl ?? "postgresql://datalint:datalint@localhost:5432/datalint",
     options.useInMemoryDatabase,
   );
-  const store = new DataLintStore(database);
+  const store = new DataLintStore(database, options.remoteLoader);
   const app = express();
   const allowedOrigins = new Set(options.allowedOrigins ?? []);
   const upload = multer({
@@ -65,7 +72,7 @@ export async function createApp(options: AppOptions): Promise<{
       }
       response.setHeader("Access-Control-Allow-Origin", origin);
       response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-      response.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
+      response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
       response.setHeader("Vary", "Origin");
     }
     if (request.method === "OPTIONS") {
@@ -114,6 +121,28 @@ export async function createApp(options: AppOptions): Promise<{
     response.status(201).json(await store.importCsv(name, request.file.originalname, request.file.buffer.toString("utf8")));
   });
 
+  app.post("/api/sources/remote", async (request, response) => {
+    response.status(201).json(await store.createRemoteSource(remoteSourceInputSchema.parse(request.body)));
+  });
+
+  app.put("/api/sources/:sourceId/csv", upload.single("file"), async (request, response) => {
+    const sourceId = identifierSchema.parse(request.params.sourceId) as SourceId;
+    if (!request.file) {
+      response.status(400).json({ error: "Choose a CSV file to refresh the source" });
+      return;
+    }
+    response.json(await store.refreshCsv(sourceId, request.file.originalname, request.file.buffer.toString("utf8")));
+  });
+
+  app.post("/api/sources/:sourceId/refresh", async (request, response) => {
+    response.json(await store.refreshRemoteSource(identifierSchema.parse(request.params.sourceId) as SourceId));
+  });
+
+  app.patch("/api/sources/:sourceId/schedule", async (request, response) => {
+    const input = z.object({ scheduleMinutes: sourceScheduleSchema }).parse(request.body);
+    response.json(await store.setSchedule(identifierSchema.parse(request.params.sourceId) as SourceId, input.scheduleMinutes));
+  });
+
   app.get("/api/rules", async (request, response) => {
     const query = sourceQuerySchema.parse(request.query);
     response.json(await store.listRules(query.sourceId as SourceId | undefined));
@@ -125,9 +154,21 @@ export async function createApp(options: AppOptions): Promise<{
     response.status(201).json(await store.createRule(sourceId, input));
   });
 
+  app.patch("/api/rules/:ruleId", async (request, response) => {
+    const input = z.object({ enabled: z.boolean() }).parse(request.body);
+    response.json(await store.setRuleEnabled(identifierSchema.parse(request.params.ruleId) as RuleId, input.enabled));
+  });
+
+  app.delete("/api/rules/:ruleId", async (request, response) => {
+    await store.deleteRule(identifierSchema.parse(request.params.ruleId) as RuleId);
+    response.status(204).end();
+  });
+
   app.post("/api/sources/:sourceId/checks", async (request, response) => {
     const sourceId = identifierSchema.parse(request.params.sourceId) as SourceId;
-    response.status(201).json(await store.runChecks(sourceId));
+    const run = await store.runChecks(sourceId);
+    await deliverPendingAlerts(store, options.webhookUrl);
+    response.status(201).json(run);
   });
 
   app.get("/api/runs", async (_request, response) => {
@@ -137,6 +178,21 @@ export async function createApp(options: AppOptions): Promise<{
   app.get("/api/issues", async (request, response) => {
     const query = issueQuerySchema.parse(request.query);
     response.json(await store.listIssues(query.status));
+  });
+
+  app.get("/api/issues/export.csv", async (_request, response) => {
+    const issues = await store.listIssues();
+    const escape = (value: string | number | null) => `"${(value === null ? "" : String(value)).replaceAll('"', '""')}"`;
+    const rows = [["status", "severity", "source", "rule", "column", "row", "message", "observed_value", "first_seen", "last_seen", "resolution_note"],
+      ...issues.map((issue) => [issue.status, issue.severity, issue.sourceName, issue.ruleName, issue.column,
+        issue.rowNumber ?? "", issue.message, issue.observedValue ?? "", issue.firstSeenAt, issue.lastSeenAt, issue.resolutionNote ?? ""])];
+    response.setHeader("Content-Type", "text/csv; charset=utf-8");
+    response.setHeader("Content-Disposition", "attachment; filename=\"datalint-issues.csv\"");
+    response.send(rows.map((row) => row.map(escape).join(",")).join("\n"));
+  });
+
+  app.get("/api/issues/:issueId/events", async (request, response) => {
+    response.json(await store.listIssueEvents(identifierSchema.parse(request.params.issueId) as IssueId));
   });
 
   app.patch("/api/issues/:issueId", async (request, response) => {
@@ -175,8 +231,9 @@ export async function createApp(options: AppOptions): Promise<{
       return;
     }
     const message = messageFor(error);
-    const isClientError = /not found|must|only|before|does not|outside|invalid|CSV|column/i.test(message);
-    response.status(isClientError ? 400 : 500).json({ error: message });
+    const isClientError = /^(Data source|Remote source|CSV source|Rule|Issue).*not found$|^Add at least|^Only remote|^Column “|^CSV |^Only \.csv|^The (source|API|JSON|Google)|^Remote sources|^Private network|^Local network|^Credentials|^Use a public|^Source columns|^Invalid regular expression/i.test(message);
+    if (!isClientError) process.stderr.write(`Request failed: ${message}\n`);
+    response.status(isClientError ? 400 : 500).json({ error: isClientError ? message : "Internal server error" });
   });
 
   return { app, close: () => database.end() };

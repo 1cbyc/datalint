@@ -149,4 +149,56 @@ describe("DataLint API", () => {
       .expect(200);
     expect(allowed.headers["access-control-allow-origin"]).toBe("https://datalint.example.com");
   });
+
+  it("refreshes a remote source, automatically resolves repaired findings, and keeps event history", async () => {
+    await close();
+    let loadCount = 0;
+    const instance = await createApp({
+      useInMemoryDatabase: true,
+      remoteLoader: () => {
+        loadCount += 1;
+        return Promise.resolve({
+          columns: ["customer_id", "name"],
+          rows: [{ customer_id: loadCount === 1 ? "" : "CUS-001", name: "Amara" }],
+          fileName: null,
+        });
+      },
+    });
+    app = instance.app;
+    close = instance.close;
+
+    const connected = await request(app).post("/api/sources/remote").send({
+      name: "Daily customers",
+      kind: "json_api",
+      url: "https://example.com/customers.json",
+      scheduleMinutes: 60,
+    }).expect(201);
+    const sourceId = sourceResponseSchema.parse(connected.body as unknown).id;
+    expect(connected.body).toMatchObject({ kind: "json_api", scheduleMinutes: 60, rowCount: 1 });
+
+    const createdRule = await request(app).post(`/api/sources/${sourceId}/rules`).send({
+      name: "Customer ID is required",
+      type: "required",
+      column: "customer_id",
+      severity: "high",
+      config: {},
+    }).expect(201);
+    const ruleId = z.object({ id: z.string() }).parse(createdRule.body as unknown).id;
+    await request(app).post(`/api/sources/${sourceId}/checks`).expect(201);
+    const openIssues = issuesResponseSchema.parse((await request(app).get("/api/issues?status=open").expect(200)).body as unknown);
+    const issueId = openIssues[0]?.id;
+    expect(issueId).toBeDefined();
+
+    await request(app).post(`/api/sources/${sourceId}/refresh`).expect(200);
+    await request(app).post(`/api/sources/${sourceId}/checks`).expect(201);
+    await request(app).get("/api/issues?status=open").expect(200, []);
+    const resolved = issuesResponseSchema.parse((await request(app).get("/api/issues?status=resolved").expect(200)).body as unknown);
+    expect(resolved[0]).toMatchObject({ id: issueId, status: "resolved" });
+    const events = await request(app).get(`/api/issues/${issueId ?? ""}/events`).expect(200);
+    expect(events.body).toEqual(expect.arrayContaining([expect.objectContaining({ type: "opened" }), expect.objectContaining({ type: "auto_resolved" })]));
+
+    await request(app).patch(`/api/rules/${ruleId}`).send({ enabled: false }).expect(200);
+    await request(app).delete(`/api/rules/${ruleId}`).expect(204);
+    await request(app).get("/api/issues/export.csv").expect("Content-Type", /text\/csv/).expect(200);
+  });
 });

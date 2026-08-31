@@ -1,26 +1,28 @@
 CREATE TABLE IF NOT EXISTS data_sources (
   id UUID PRIMARY KEY,
   name TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind = 'csv'),
+  kind TEXT NOT NULL,
   file_name TEXT NOT NULL,
   row_count INTEGER NOT NULL CHECK (row_count >= 0),
   columns_json JSONB NOT NULL,
   rows_json JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL
+  updated_at TIMESTAMPTZ NOT NULL,
+  CONSTRAINT data_sources_kind_check CHECK (kind IN ('csv', 'google_sheets', 'json_api'))
 );
 
 CREATE TABLE IF NOT EXISTS rules (
   id UUID PRIMARY KEY,
   source_id UUID NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('required', 'unique', 'email', 'number_range', 'allowed_values', 'pattern')),
+  type TEXT NOT NULL,
   column_name TEXT NOT NULL,
   config_json JSONB NOT NULL,
   severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high')),
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL
+  updated_at TIMESTAMPTZ NOT NULL,
+  CONSTRAINT rules_type_check CHECK (type IN ('required', 'unique', 'email', 'number_range', 'allowed_values', 'pattern', 'numeric_outlier', 'row_count_change'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_rules_source_id ON rules(source_id);

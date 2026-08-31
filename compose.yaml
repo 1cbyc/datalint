@@ -25,6 +25,7 @@ services:
       MAX_UPLOAD_BYTES: "5242880"
       DATALINT_API_TOKEN: ${DATALINT_API_TOKEN:-}
       DATALINT_ALLOWED_ORIGINS: ${DATALINT_ALLOWED_ORIGINS:-http://localhost:4100}
+      DATALINT_ALERT_WEBHOOK_URL: ${DATALINT_ALERT_WEBHOOK_URL:-}
     depends_on:
       postgres:
         condition: service_healthy

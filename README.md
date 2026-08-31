@@ -1,6 +1,14 @@
 # DataLint
 
-DataLint finds bad records before they become expensive mistakes. Import a CSV, define the rules that matter to your business, run a check, and work through the resulting issues.
+DataLint finds bad records before they become expensive mistakes. Import a CSV or connect a public data source, define the rules that matter to your business, and work through the resulting issues.
+
+## Sources and workflows
+
+- CSV import and replacement snapshots
+- public Google Sheets
+- public JSON APIs with an optional record path
+- manual, hourly, six-hourly, daily, or weekly checks
+- issue history, automatic closure, CSV reports, and deduplicated webhook alerts
 
 ## What it checks
 
@@ -10,8 +18,10 @@ DataLint finds bad records before they become expensive mistakes. Import a CSV, 
 - numeric ranges
 - allowed values
 - regular-expression patterns
+- numeric outliers
+- unexpected row-count changes
 
-Findings are deduplicated across runs. Resolving an issue keeps the history, and a later run reopens it when the same problem returns.
+Findings are deduplicated across runs. A repaired finding closes automatically; resolving one manually keeps the history, and a later run reopens it when the same problem returns.
 
 ## Run it locally
 
@@ -47,7 +57,7 @@ The web interface runs at [http://localhost:5173](http://localhost:5173), with t
 | `npm run build` | Build the server and web interface |
 | `npm start` | Start the production build |
 
-The API uses PostgreSQL through `DATABASE_URL`. Set `DATALINT_API_TOKEN` to require a bearer token and `DATALINT_ALLOWED_ORIGINS` to restrict browser origins. The full list of environment variables is in [`.env.example`](.env.example).
+The API uses PostgreSQL through `DATABASE_URL`. Set `DATALINT_API_TOKEN` to require a bearer token, `DATALINT_ALLOWED_ORIGINS` to restrict browser origins, and `DATALINT_ALERT_WEBHOOK_URL` to receive newly opened or reopened issues. The full list of environment variables is in [`.env.example`](.env.example).
 
 Architecture decisions are recorded in [`docs/architecture/adr-000-overview.md`](docs/architecture/adr-000-overview.md).
 
