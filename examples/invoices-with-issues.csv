@@ -1,0 +1,5 @@
+invoice_id,customer_email,amount,status
+INV-1001,amara@example.com,12500,paid
+INV-1002,bad-email,4800,pending
+INV-1002,tunde@example.com,-500,paid
+,zainab@example.com,7200,unknown
