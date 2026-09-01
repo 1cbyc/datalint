@@ -14,7 +14,8 @@ import type {
   SourceSchedule,
 } from "../shared/domain";
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
+const defaultApiBaseUrl = "https://datalint-api.nsisong.com";
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") || defaultApiBaseUrl;
 const tokenStorageKey = "datalint-api-token";
 export const remoteApiEnabled = apiBaseUrl !== "";
 
